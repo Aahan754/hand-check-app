@@ -1,0 +1,21 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Hand Movement Screening Tool</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <div id="app">
+    <video id="webcam" autoplay playsinline muted></video>
+    <canvas id="overlay"></canvas>
+    <div id="status-line">Loading hand tracking model...</div>
+  </div>
+
+  <!-- Plain script (not a module) so analysis.js attaches to window.HandAnalysis -->
+  <script src="analysis.js"></script>
+  <!-- Module script, needed for the MediaPipe Tasks Vision import -->
+  <script type="module" src="app.js"></script>
+</body>
+</html>
