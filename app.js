@@ -33,7 +33,7 @@ const DISCLAIMER = "Movement metrics only -- not a medical diagnosis";
 let appState = "loading"; // loading -> menu -> tremor | tap | spiral
 let handLandmarker = null;
 let mousePos = { x: -1, y: -1 };
-let lastKey = null;
+let lastTimestamp = 0; // Ensures strictly increasing timestamps for MediaPipe WASM
 
 let W = 1280, H = 720;
 
@@ -124,28 +124,33 @@ function pointInRect([x1, y1, x2, y2], x, y) {
 
 // ---------------- Menu ----------------
 
-const menuButtons = {
-  tremor: [W/2-200, 280, W/2+200, 340],
-  tap: [W/2-200, 360, W/2+200, 420],
-  spiral: [W/2-200, 440, W/2+200, 500],
-};
+// Helper to compute menu button bounding boxes dynamically based on current W and H
+function getMenuButtons() {
+  return {
+    tremor: [W / 2 - 200, 280, W / 2 + 200, 340],
+    tap: [W / 2 - 200, 360, W / 2 + 200, 420],
+    spiral: [W / 2 - 200, 440, W / 2 + 200, 500],
+  };
+}
 
 function renderMenu() {
   ctx.fillStyle = "#1e1e1e";
   ctx.fillRect(0, 0, W, H);
-  drawText("Hand Movement Screening Tool", W/2 - 220, 150, "#ffffff", 32);
-  drawText("Choose a test:", W/2 - 80, 220, "#c8c8c8", 20);
+  drawText("Hand Movement Screening Tool", W / 2 - 220, 150, "#ffffff", 32);
+  drawText("Choose a test:", W / 2 - 80, 220, "#c8c8c8", 20);
 
-  drawButton(menuButtons.tremor, "1: Tremor / Writing Jitter");
-  drawButton(menuButtons.tap, "2: Finger Tap Test");
-  drawButton(menuButtons.spiral, "3: Spiral Trace Test");
+  const buttons = getMenuButtons();
+  drawButton(buttons.tremor, "1: Tremor / Writing Jitter");
+  drawButton(buttons.tap, "2: Finger Tap Test");
+  drawButton(buttons.spiral, "3: Spiral Trace Test");
 
-  drawText("Press 1, 2, 3 or click a button", W/2 - 130, 540, "#b4b4b4", 16);
-  drawText(DISCLAIMER, W/2 - 150, 580, COLOR.disclaimer, 16);
+  drawText("Press 1, 2, 3 or click a button", W / 2 - 130, 540, "#b4b4b4", 16);
+  drawText(DISCLAIMER, W / 2 - 150, 580, COLOR.disclaimer, 16);
 }
 
 function handleMenuClick(x, y) {
-  for (const [key, rect] of Object.entries(menuButtons)) {
+  const buttons = getMenuButtons();
+  for (const [key, rect] of Object.entries(buttons)) {
     if (pointInRect(rect, x, y)) {
       startTest(key);
       return;
@@ -169,6 +174,9 @@ function startTest(name) {
 
 function returnToMenu() {
   video.style.opacity = "1";
+  if (tremorTest) tremorTest.reset();
+  if (tapTest) tapTest.reset();
+  if (spiralTest) spiralTest.reset();
   appState = "menu";
 }
 
@@ -246,7 +254,7 @@ const tremorTest = {
     let y = 60;
     for (const w of this.warnings) { drawText(w, 10, y, COLOR.warning, 20); y += 25; }
     for (const [text, color] of this.readouts) { drawText(text, 10, y, color, 20); y += 25; }
-    drawHelpLine("q/Esc: menu   r: restart");
+    drawHelpLine("q/Esc: menu    r: restart");
     drawDisclaimer();
   },
 
@@ -357,7 +365,7 @@ const tapTest = {
     let y = 120;
     for (const w of this.warnings) { drawText(w, 10, y, COLOR.warning, 18); y += 22; }
 
-    drawHelpLine("SPACE: start   q/Esc: menu   r: restart");
+    drawHelpLine("SPACE: start    q/Esc: menu    r: restart");
     drawDisclaimer();
   },
 
@@ -414,7 +422,7 @@ const spiralTest = {
     if (!this.spiralRef) this.reset();
     this.warnings = [];
 
-    // dark background instead of live video for this test
+    // Dark background instead of live video for this test
     ctx.fillStyle = "#141414";
     ctx.fillRect(0, 0, W, H);
 
@@ -448,6 +456,8 @@ const spiralTest = {
         const dist = A.minDistanceToSpiral(fingertipPx, this.spiralRef);
         this.deviationSamples.push(dist);
       }
+    } else if (this.state === "running") {
+      this.warnings.push("No hand detected -- hold index fingertip over spiral");
     }
 
     ctx.strokeStyle = "#ffc800";
@@ -509,7 +519,7 @@ const spiralTest = {
     let y = 110;
     for (const w of this.warnings) { drawText(w, 10, y, COLOR.warning, 18); y += 22; }
 
-    drawHelpLine("SPACE: start   F: finish early   q/Esc: menu   r: restart");
+    drawHelpLine("SPACE: start    F: finish early    q/Esc: menu    r: restart");
     drawDisclaimer();
   },
 
@@ -548,8 +558,7 @@ async function detectAndDraw() {
 
   // Draw a horizontally-mirrored copy of the video into procCanvas, then
   // run detection on THAT -- so landmark coordinates already match the
-  // mirrored view the user sees (same approach as the Python version,
-  // which flips the frame before processing).
+  // mirrored view the user sees.
   procCtx.save();
   procCtx.translate(W, 0);
   procCtx.scale(-1, 1);
@@ -558,9 +567,21 @@ async function detectAndDraw() {
 
   const now = performance.now() / 1000;
   let handsLandmarks = [];
+
   if (handLandmarker) {
-    const result = handLandmarker.detectForVideo(procCanvas, performance.now());
-    handsLandmarks = result.landmarks || [];
+    // Ensure strictly increasing timestamps for MediaPipe WASM execution
+    let nowMs = performance.now();
+    if (nowMs <= lastTimestamp) {
+      nowMs = lastTimestamp + 1;
+    }
+    lastTimestamp = nowMs;
+
+    try {
+      const result = handLandmarker.detectForVideo(procCanvas, nowMs);
+      handsLandmarks = result.landmarks || [];
+    } catch (detectErr) {
+      console.warn("HandLandmarker tracking error:", detectErr);
+    }
   }
 
   ctx.clearRect(0, 0, W, H);
@@ -615,20 +636,45 @@ async function init() {
     const vision = await FilesetResolver.forVisionTasks(
       "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm"
     );
-    handLandmarker = await HandLandmarker.createFromOptions(vision, {
-      baseOptions: {
-        modelAssetPath:
-          "https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task",
-        delegate: "GPU",
-      },
-      runningMode: "VIDEO",
-      numHands: 2,
-    });
+
+    // Initial attempt with GPU acceleration
+    try {
+      handLandmarker = await HandLandmarker.createFromOptions(vision, {
+        baseOptions: {
+          modelAssetPath:
+            "https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task",
+          delegate: "GPU",
+        },
+        runningMode: "VIDEO",
+        numHands: 2,
+      });
+    } catch (gpuErr) {
+      console.warn("GPU delegate failed, falling back to CPU delegate:", gpuErr);
+      handLandmarker = await HandLandmarker.createFromOptions(vision, {
+        baseOptions: {
+          modelAssetPath:
+            "https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task",
+          delegate: "CPU",
+        },
+        runningMode: "VIDEO",
+        numHands: 2,
+      });
+    }
 
     statusLine.textContent = "Requesting camera access...";
-    const stream = await navigator.mediaDevices.getUserMedia({
-      video: { width: { ideal: 1280 }, height: { ideal: 720 } },
-    });
+
+    let stream;
+    try {
+      // Primary attempt: Request HD resolution
+      stream = await navigator.mediaDevices.getUserMedia({
+        video: { width: { ideal: 1280 }, height: { ideal: 720 }, facingMode: "user" },
+      });
+    } catch (hdErr) {
+      console.warn("HD camera constraint failed, attempting basic camera access:", hdErr);
+      // Fallback attempt: Request default camera feed without strict resolution parameters
+      stream = await navigator.mediaDevices.getUserMedia({ video: true });
+    }
+
     video.srcObject = stream;
 
     await new Promise((resolve) => { video.onloadedmetadata = resolve; });
@@ -640,9 +686,11 @@ async function init() {
     appState = "menu";
     detectAndDraw();
   } catch (err) {
-    console.error(err);
-    statusLine.textContent =
-      "Error: " + err.message + " -- check camera permissions and that you're on https:// or localhost.";
+    console.error("Camera/Initialization error:", err);
+    statusLine.innerHTML =
+      `Error: ${err.message}<br>` +
+      `<small style="color: #b4b4b4;">Please ensure camera permissions are allowed, no other app (Zoom/Teams) is using the webcam, and you are using HTTPS.</small><br>` +
+      `<button onclick="location.reload()" style="margin-top:10px; padding:6px 16px; background:#ff7800; color:#fff; border:none; border-radius:4px; cursor:pointer;">Retry Camera Access</button>`;
   }
 }
 
