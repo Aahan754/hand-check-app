@@ -37,9 +37,19 @@ let lastTimestamp = 0; // Ensures strictly increasing timestamps for MediaPipe W
 
 let W = 1280, H = 720;
 
+/**
+ * Dynamically resizes the overlay and processing canvases to match
+ * the native resolution and aspect ratio of the connected camera feed.
+ */
 function fitCanvasToVideo() {
-  W = video.videoWidth || 1280;
-  H = video.videoHeight || 720;
+  if (video.videoWidth && video.videoHeight) {
+    W = video.videoWidth;
+    H = video.videoHeight;
+  } else {
+    W = 1280;
+    H = 720;
+  }
+  
   canvas.width = W;
   canvas.height = H;
   procCanvas.width = W;
@@ -636,33 +646,31 @@ window.addEventListener("keydown", (e) => {
   else if (appState === "spiral") spiralTest.handleKey(e.key);
 });
 
-// ---------------- Startup with Multi-Aspect Ratio Fallback Sequence ----------------
+// ---------------- Startup with Flexible Aspect Ratio Fallbacks ----------------
 
+/**
+ * Attempts to initialize the camera using standard aspect ratios (16:9, 4:3, etc.)
+ * soft-requested via `ideal` constraints. Falls back cleanly to unconstrained video.
+ */
 async function getCameraStreamWithFallback() {
-  // Comprehensive list of common aspect ratios across desktop webcams, smartphones, and tablet cameras
   const aspectRatios = [
-    { name: "16:9 Landscape HD", constraints: { width: { ideal: 1280 }, height: { ideal: 720 }, aspectRatio: { ideal: 16/9 } } },
-    { name: "4:3 Standard Web", constraints: { width: { ideal: 640 }, height: { ideal: 480 }, aspectRatio: { ideal: 4/3 } } },
-    { name: "1:1 Square Mobile", constraints: { width: { ideal: 720 }, height: { ideal: 720 }, aspectRatio: { ideal: 1/1 } } },
-    { name: "18:9 Widescreen Mobile", constraints: { width: { ideal: 1440 }, height: { ideal: 720 }, aspectRatio: { ideal: 18/9 } } },
-    { name: "21:9 Ultra-Wide", constraints: { width: { ideal: 1280 }, height: { ideal: 540 }, aspectRatio: { ideal: 21/9 } } },
+    { name: "16:9 Landscape", constraints: { width: { ideal: 1280 }, height: { ideal: 720 }, aspectRatio: { ideal: 1.7777777778 } } },
+    { name: "4:3 Standard", constraints: { width: { ideal: 640 }, height: { ideal: 480 }, aspectRatio: { ideal: 1.3333333333 } } },
+    { name: "1:1 Square", constraints: { width: { ideal: 720 }, height: { ideal: 720 }, aspectRatio: { ideal: 1.0 } } },
   ];
 
   for (const config of aspectRatios) {
     try {
-      console.log(`Attempting camera access with ${config.name}...`);
       const stream = await navigator.mediaDevices.getUserMedia({
         video: { ...config.constraints, facingMode: "user" },
       });
-      console.log(`Camera initialized successfully using ${config.name}`);
       return stream;
     } catch (err) {
-      console.warn(`Camera request failed for ${config.name}:`, err.name || err.message);
+      console.warn(`Camera profile fallback (${config.name}):`, err.name || err.message);
     }
   }
 
-  // Ultimate fallback: open default camera without any media constraint limitations
-  console.log("Falling back to unconstrained default video media stream...");
+  // Final fallback: Request any available camera feed without strict constraints
   return await navigator.mediaDevices.getUserMedia({ video: true });
 }
 
