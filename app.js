@@ -1,6 +1,6 @@
 import { HandLandmarker, FilesetResolver } from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/vision_bundle.mjs";
 
-const A = window.HandAnalysis; // analysis.js, loaded as a plain script before this module
+const A = window.HandAnalysis;
 
 // ---------------- DOM setup ----------------
 
@@ -9,10 +9,10 @@ const canvas = document.getElementById("overlay");
 const ctx = canvas.getContext("2d");
 const statusLine = document.getElementById("status-line");
 
-const procCanvas = document.createElement("canvas"); // off-screen, mirrored copy fed to the model
+const procCanvas = document.createElement("canvas");
 const procCtx = procCanvas.getContext("2d", { willReadFrequently: true });
 
-// ---------------- Colors (matching the Python version) ----------------
+// ---------------- Colors ----------------
 
 const COLOR = {
   bone: "#ffffff",
@@ -30,24 +30,23 @@ const DISCLAIMER = "Movement metrics only -- not a medical diagnosis";
 
 // ---------------- App state ----------------
 
-let appState = "loading"; // loading -> menu -> tremor | tap | spiral
+let appState = "loading";
 let handLandmarker = null;
 let mousePos = { x: -1, y: -1 };
-let lastTimestamp = 0; // Ensures strictly increasing timestamps for MediaPipe WASM
+let lastTimestamp = 0;
 
-let W = 1280, H = 720;
+let W = 640, H = 480;
+let aspectRatio = 4 / 3;
 
-/**
- * Dynamically resizes the overlay and processing canvases to match
- * the native resolution and aspect ratio of the connected camera feed.
- */
 function fitCanvasToVideo() {
   if (video.videoWidth && video.videoHeight) {
     W = video.videoWidth;
     H = video.videoHeight;
+    aspectRatio = W / H;
   } else {
-    W = 1280;
-    H = 720;
+    W = 640;
+    H = 480;
+    aspectRatio = 4 / 3;
   }
   
   canvas.width = W;
@@ -91,13 +90,8 @@ function checkNearEdge(landmarks, margin = 0.03) {
   );
 }
 
-function handScaleOf(landmarks) {
-  const wrist = landmarks[0], middleMcp = landmarks[9];
-  return Math.hypot(middleMcp.x - wrist.x, middleMcp.y - wrist.y);
-}
-
 function drawText(text, x, y, color, size = 20) {
-  const scaledSize = Math.max(12, Math.round(size * (H / 720)));
+  const scaledSize = Math.max(12, Math.round(size * (H / 480)));
   ctx.font = `${scaledSize}px -apple-system, sans-serif`;
   ctx.fillStyle = color;
   ctx.fillText(text, x, y);
@@ -120,7 +114,7 @@ function drawButton(rect, label) {
   ctx.lineWidth = 2;
   ctx.strokeRect(x1, y1, x2 - x1, y2 - y1);
   
-  const fontSize = Math.max(14, Math.round(20 * (H / 720)));
+  const fontSize = Math.max(14, Math.round(20 * (H / 480)));
   ctx.font = `${fontSize}px -apple-system, sans-serif`;
   ctx.fillStyle = COLOR.buttonText;
   ctx.textAlign = "center";
@@ -155,16 +149,16 @@ function renderMenu() {
   ctx.fillStyle = "#1e1e1e";
   ctx.fillRect(0, 0, W, H);
   
-  drawText("Hand Movement Screening Tool", W / 2 - Math.min(220, W * 0.35), H * 0.2, "#ffffff", 32);
-  drawText("Choose a test:", W / 2 - Math.min(80, W * 0.15), H * 0.3, "#c8c8c8", 20);
+  drawText("Hand Movement Screening Tool", W / 2 - Math.min(220, W * 0.35), H * 0.2, "#ffffff", 28);
+  drawText("Choose a test:", W / 2 - Math.min(80, W * 0.15), H * 0.3, "#c8c8c8", 18);
 
   const buttons = getMenuButtons();
   drawButton(buttons.tremor, "1: Tremor / Writing Jitter");
   drawButton(buttons.tap, "2: Finger Tap Test");
   drawButton(buttons.spiral, "3: Spiral Trace Test");
 
-  drawText("Press 1, 2, 3 or click a button", W / 2 - Math.min(130, W * 0.2), H * 0.82, "#b4b4b4", 16);
-  drawText(DISCLAIMER, W / 2 - Math.min(150, W * 0.25), H * 0.88, COLOR.disclaimer, 16);
+  drawText("Press 1, 2, 3 or click a button", W / 2 - Math.min(130, W * 0.2), H * 0.82, "#b4b4b4", 15);
+  drawText(DISCLAIMER, W / 2 - Math.min(150, W * 0.25), H * 0.88, COLOR.disclaimer, 15);
 }
 
 function handleMenuClick(x, y) {
@@ -210,12 +204,16 @@ const tremorTest = {
   readouts: [],
   prevHandCount: 0,
   lastDropTime: 0,
+  lastAnalysisTime: 0,
+  lastAnalysisResults: [null, null],
 
   reset() {
     this.buffers = [[], []];
     this.lastValidXY = [null, null];
     this.prevHandCount = 0;
     this.lastDropTime = 0;
+    this.lastAnalysisTime = 0;
+    this.lastAnalysisResults = [null, null];
   },
 
   update(handsLandmarks, now) {
@@ -223,16 +221,22 @@ const tremorTest = {
     this.readouts = [];
     const currentHandCount = handsLandmarks.length;
 
+    const shouldRunAnalysis = now - this.lastAnalysisTime > 0.1;
+    if (shouldRunAnalysis) {
+      this.lastAnalysisTime = now;
+    }
+
     handsLandmarks.slice(0, 2).forEach((landmarks, idx) => {
       drawHand(landmarks);
       if (checkNearEdge(landmarks)) {
         this.warnings.push(`Hand ${idx+1} not fully in frame -- move hand toward center`);
       }
-      const scale = handScaleOf(landmarks);
+      
+      const scale = A.handScaleOfAspect(landmarks, aspectRatio);
       const tip = landmarks[8];
       let tipXY = [tip.x, tip.y];
 
-      if (!A.rejectOutlier(this.lastValidXY[idx], tipXY, scale)) {
+      if (!A.rejectOutlier(this.lastValidXY[idx], tipXY, scale, 1.8, aspectRatio)) {
         tipXY = this.lastValidXY[idx];
       } else {
         this.lastValidXY[idx] = tipXY;
@@ -242,7 +246,11 @@ const tremorTest = {
       buf.push({ t: now, x: tipXY[0], y: tipXY[1], scale });
       while (buf.length && now - buf[0].t > A.TREMOR_WINDOW_SECONDS) buf.shift();
 
-      const result = A.analyzeTremor(buf);
+      if (shouldRunAnalysis) {
+        this.lastAnalysisResults[idx] = A.analyzeTremor(buf);
+      }
+
+      const result = this.lastAnalysisResults[idx];
       if (!result) {
         this.readouts.push([`Hand ${idx+1}: collecting data... (${buf.length} samples)`, COLOR.info]);
       } else if (result.status === "fps_too_low") {
@@ -271,8 +279,8 @@ const tremorTest = {
   render(handCount) {
     drawText(`Hands: ${handCount}`, 10, 30, "#22c55e", 20);
     let y = 60;
-    for (const w of this.warnings) { drawText(w, 10, y, COLOR.warning, 20); y += 25; }
-    for (const [text, color] of this.readouts) { drawText(text, 10, y, color, 20); y += 25; }
+    for (const w of this.warnings) { drawText(w, 10, y, COLOR.warning, 18); y += 22; }
+    for (const [text, color] of this.readouts) { drawText(text, 10, y, color, 18); y += 22; }
     drawHelpLine("q/Esc: menu    r: restart");
     drawDisclaimer();
   },
@@ -288,7 +296,7 @@ const tremorTest = {
 // ============================================================
 
 const tapTest = {
-  state: "waiting", // waiting -> countdown -> running -> done
+  state: "waiting",
   countdownStart: null,
   runStart: null,
   samples: [],
@@ -313,10 +321,12 @@ const tapTest = {
       const landmarks = handsLandmarks[0];
       drawHand(landmarks);
       if (checkNearEdge(landmarks)) this.warnings.push("Hand not fully in frame");
-      const scale = handScaleOf(landmarks);
+      
+      const scale = A.handScaleOfAspect(landmarks, aspectRatio);
       const thumb = landmarks[4], index = landmarks[8];
+      
       if (scale > 0) {
-        const rawPinch = Math.hypot(thumb.x - index.x, thumb.y - index.y) / scale;
+        const rawPinch = A.distanceAspect(thumb, index, aspectRatio) / scale;
         if (this.lastValidPinch !== null && Math.abs(rawPinch - this.lastValidPinch) > 0.7) {
           pinchNorm = this.lastValidPinch;
         } else {
@@ -346,16 +356,16 @@ const tapTest = {
     this.startButton = [W/2 - btnW/2, H - H*0.2, W/2 + btnW/2, H - H*0.2 + btnH];
 
     if (this.state === "waiting") {
-      drawText("Get your hand in frame, then click Start or press SPACE", 30, 50, "#22c55e", 22);
-      drawText("Tap thumb and index finger together repeatedly, as fast as you can", 30, 85, "#c8c8c8", 17);
+      drawText("Get your hand in frame, then click Start or press SPACE", 30, 50, "#22c55e", 20);
+      drawText("Tap thumb and index finger together repeatedly, as fast as you can", 30, 85, "#c8c8c8", 16);
       drawButton(this.startButton, "Start Test");
     } else if (this.state === "countdown") {
       const remaining = Math.ceil(3 - (performance.now()/1000 - this.countdownStart));
-      drawText(`Starting in ${Math.max(remaining,1)}...`, 30, 50, COLOR.info, 28);
+      drawText(`Starting in ${Math.max(remaining,1)}...`, 30, 50, COLOR.info, 26);
     } else if (this.state === "running") {
       const elapsed = performance.now()/1000 - this.runStart;
       const remaining = A.TAP_TEST_DURATION - elapsed;
-      drawText(`TAP! Time left: ${remaining.toFixed(1)}s`, 30, 50, COLOR.info, 24);
+      drawText(`TAP! Time left: ${remaining.toFixed(1)}s`, 30, 50, COLOR.info, 22);
       const barW = Math.max(0, (W * 0.4) * (elapsed / A.TAP_TEST_DURATION));
       ctx.strokeStyle = "#505050"; ctx.strokeRect(30, 65, W * 0.4, 15);
       ctx.fillStyle = COLOR.info; ctx.fillRect(30, 65, barW, 15);
@@ -363,9 +373,9 @@ const tapTest = {
       let y = 50;
       const r = this.result;
       if (!r || r.error) {
-        drawText("Not enough data captured -- press r to retry", 30, y, COLOR.warning, 20);
+        drawText("Not enough data captured -- press r to retry", 30, y, COLOR.warning, 18);
       } else if (r.insufficient) {
-        drawText(`Only ${r.numTaps} taps detected -- press r to retry`, 30, y, COLOR.warning, 20);
+        drawText(`Only ${r.numTaps} taps detected -- press r to retry`, 30, y, COLOR.warning, 18);
       } else {
         const lines = [
           [`Taps detected: ${r.numTaps}`, COLOR.good],
@@ -378,13 +388,13 @@ const tapTest = {
         lines.push(r.decrementPattern
           ? ["Decrement pattern observed (amplitude shrank >20%)", COLOR.warning]
           : ["No strong decrement pattern in this trial", COLOR.good]);
-        for (const [text, color] of lines) { drawText(text, 30, y, color, 20); y += 30; }
+        for (const [text, color] of lines) { drawText(text, 30, y, color, 18); y += 26; }
       }
-      drawText("Press r to retry", 30, y + 10, "#c8c8c8", 17);
+      drawText("Press r to retry", 30, y + 10, "#c8c8c8", 16);
     }
 
     let y = 120;
-    for (const w of this.warnings) { drawText(w, 10, y, COLOR.warning, 18); y += 22; }
+    for (const w of this.warnings) { drawText(w, 10, y, COLOR.warning, 16); y += 20; }
 
     drawHelpLine("SPACE: start    q/Esc: menu    r: restart");
     drawDisclaimer();
@@ -415,7 +425,7 @@ const SPIRAL_TURNS = 3;
 const SPIRAL_MAX_DURATION = 25.0;
 
 const spiralTest = {
-  state: "waiting", // waiting -> running -> done
+  state: "waiting",
   runStart: null,
   tracePoints: [],
   deviationSamples: [],
@@ -456,11 +466,12 @@ const spiralTest = {
       const landmarks = handsLandmarks[0];
       drawHand(landmarks);
       if (checkNearEdge(landmarks)) this.warnings.push("Hand not fully in frame");
-      const scale = handScaleOf(landmarks);
+      
+      const scale = A.handScaleOfAspect(landmarks, aspectRatio);
       const tip = landmarks[8];
       let tipNorm = [tip.x, tip.y];
 
-      if (!A.rejectOutlier(this.lastValidTipXY, tipNorm, scale)) {
+      if (!A.rejectOutlier(this.lastValidTipXY, tipNorm, scale, 1.8, aspectRatio)) {
         tipNorm = this.lastValidTipXY;
       } else {
         this.lastValidTipXY = tipNorm;
@@ -493,22 +504,22 @@ const spiralTest = {
     this.startButton = [W/2 - btnW/2, H - H*0.2, W/2 + btnW/2, H - H*0.2 + btnH];
 
     if (this.state === "waiting") {
-      drawText("Get your fingertip in frame, then click Start or press SPACE", 30, 50, "#22c55e", 20);
-      drawText("Trace the gray spiral with your index fingertip", 30, 80, "#c8c8c8", 17);
+      drawText("Get your fingertip in frame, then click Start or press SPACE", 30, 50, "#22c55e", 18);
+      drawText("Trace the gray spiral with your index fingertip", 30, 80, "#c8c8c8", 16);
       drawButton(this.startButton, "Start Test");
     } else if (this.state === "running") {
       const elapsed = performance.now()/1000 - this.runStart;
       const remaining = SPIRAL_MAX_DURATION - elapsed;
-      drawText(`Tracing... time left: ${remaining.toFixed(1)}s (press F when finished)`, 30, 40, COLOR.info, 20);
+      drawText(`Tracing... time left: ${remaining.toFixed(1)}s (press F when finished)`, 30, 40, COLOR.info, 18);
       if (this.deviationSamples.length) {
         const meanDev = A.mean(this.deviationSamples);
-        drawText(`Live avg deviation: ${meanDev.toFixed(1)}px (${(meanDev/this.spiralMaxRadius*100).toFixed(1)}% of radius)`, 30, 65, COLOR.info, 16);
+        drawText(`Live avg deviation: ${meanDev.toFixed(1)}px (${(meanDev/this.spiralMaxRadius*100).toFixed(1)}% of radius)`, 30, 65, COLOR.info, 15);
       }
       if (remaining <= 0) this.state = "done";
     } else if (this.state === "done") {
       let y = 40;
       if (this.deviationSamples.length < 10) {
-        drawText("Not enough tracing captured -- press r to retry", 30, y, COLOR.warning, 20);
+        drawText("Not enough tracing captured -- press r to retry", 30, y, COLOR.warning, 18);
       } else {
         const meanDev = A.mean(this.deviationSamples);
         const maxDev = Math.max(...this.deviationSamples);
@@ -533,13 +544,13 @@ const spiralTest = {
           }
         }
 
-        for (const [text, color] of lines) { drawText(text, 30, y, color, 20); y += 30; }
+        for (const [text, color] of lines) { drawText(text, 30, y, color, 18); y += 26; }
       }
-      drawText("Press r to retry", 30, y + 10, "#c8c8c8", 17);
+      drawText("Press r to retry", 30, y + 10, "#c8c8c8", 16);
     }
 
     let y = 110;
-    for (const w of this.warnings) { drawText(w, 10, y, COLOR.warning, 18); y += 22; }
+    for (const w of this.warnings) { drawText(w, 10, y, COLOR.warning, 16); y += 20; }
 
     drawHelpLine("SPACE: start    F: finish early    q/Esc: menu    r: restart");
     drawDisclaimer();
@@ -646,22 +657,18 @@ window.addEventListener("keydown", (e) => {
   else if (appState === "spiral") spiralTest.handleKey(e.key);
 });
 
-// ---------------- Startup with Legacy Hardware Fallback ----------------
+// ---------------- Startup with High FPS SD Fallback ----------------
 
 async function getCameraStreamWithFallback() {
-  // Array of constraint profiles from ideal HD down to completely unconstrained
   const profiles = [
-    { name: "Ideal HD 16:9", constraints: { video: { width: { ideal: 1280 }, height: { ideal: 720 }, facingMode: "user" } } },
-    { name: "Ideal SD 4:3", constraints: { video: { width: { ideal: 640 }, height: { ideal: 480 } } } },
+    { name: "SD High FPS 4:3", constraints: { video: { width: { ideal: 640 }, height: { ideal: 480 }, frameRate: { ideal: 60, min: 30 } } } },
     { name: "Basic Video", constraints: { video: true } },
     { name: "Bare Minimum Constraints", constraints: { video: {} } }
   ];
 
   for (const profile of profiles) {
     try {
-      console.log(`Attempting camera connection profile: ${profile.name}`);
       const stream = await navigator.mediaDevices.getUserMedia(profile.constraints);
-      console.log(`Successfully acquired camera stream via ${profile.name}`);
       return stream;
     } catch (err) {
       console.warn(`Profile failed (${profile.name}):`, err.name, err.message);
@@ -678,19 +685,7 @@ async function init() {
       "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm"
     );
 
-    // Load MediaPipe model with fallback for older hardware GPU limitations
     try {
-      handLandmarker = await HandLandmarker.createFromOptions(vision, {
-        baseOptions: {
-          modelAssetPath:
-            "https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task",
-          delegate: "GPU",
-        },
-        runningMode: "VIDEO",
-        numHands: 2,
-      });
-    } catch (gpuErr) {
-      console.warn("GPU delegate failed on this hardware, falling back to CPU:", gpuErr);
       handLandmarker = await HandLandmarker.createFromOptions(vision, {
         baseOptions: {
           modelAssetPath:
@@ -700,6 +695,8 @@ async function init() {
         runningMode: "VIDEO",
         numHands: 2,
       });
+    } catch (modelErr) {
+      console.warn("Failed to initialize hand landmarker model:", modelErr);
     }
 
     statusLine.textContent = "Requesting camera access...";
@@ -707,7 +704,6 @@ async function init() {
 
     video.srcObject = stream;
 
-    // Wait for video metadata to ensure dimensions are loaded before sizing canvas
     await new Promise((resolve) => {
       if (video.readyState >= 1) {
         resolve();
