@@ -87,7 +87,8 @@ function handScaleOf(landmarks) {
 }
 
 function drawText(text, x, y, color, size = 20) {
-  ctx.font = `${size}px -apple-system, sans-serif`;
+  const scaledSize = Math.max(12, Math.round(size * (H / 720)));
+  ctx.font = `${scaledSize}px -apple-system, sans-serif`;
   ctx.fillStyle = color;
   ctx.fillText(text, x, y);
 }
@@ -108,7 +109,9 @@ function drawButton(rect, label) {
   ctx.strokeStyle = "#ffffff";
   ctx.lineWidth = 2;
   ctx.strokeRect(x1, y1, x2 - x1, y2 - y1);
-  ctx.font = "20px -apple-system, sans-serif";
+  
+  const fontSize = Math.max(14, Math.round(20 * (H / 720)));
+  ctx.font = `${fontSize}px -apple-system, sans-serif`;
   ctx.fillStyle = COLOR.buttonText;
   ctx.textAlign = "center";
   ctx.textBaseline = "middle";
@@ -122,30 +125,36 @@ function pointInRect([x1, y1, x2, y2], x, y) {
   return x >= x1 && x <= x2 && y >= y1 && y <= y2;
 }
 
-// ---------------- Menu ----------------
+// ---------------- Dynamic Layout & Menu ----------------
 
-// Helper to compute menu button bounding boxes dynamically based on current W and H
 function getMenuButtons() {
+  const btnW = Math.min(400, W * 0.6);
+  const btnH = Math.min(60, H * 0.08);
+  const centerX = W / 2;
+  const startY = H * 0.38;
+  const gap = btnH + 20;
+
   return {
-    tremor: [W / 2 - 200, 280, W / 2 + 200, 340],
-    tap: [W / 2 - 200, 360, W / 2 + 200, 420],
-    spiral: [W / 2 - 200, 440, W / 2 + 200, 500],
+    tremor: [centerX - btnW / 2, startY, centerX + btnW / 2, startY + btnH],
+    tap: [centerX - btnW / 2, startY + gap, centerX + btnW / 2, startY + gap + btnH],
+    spiral: [centerX - btnW / 2, startY + gap * 2, centerX + btnW / 2, startY + gap * 2 + btnH],
   };
 }
 
 function renderMenu() {
   ctx.fillStyle = "#1e1e1e";
   ctx.fillRect(0, 0, W, H);
-  drawText("Hand Movement Screening Tool", W / 2 - 220, 150, "#ffffff", 32);
-  drawText("Choose a test:", W / 2 - 80, 220, "#c8c8c8", 20);
+  
+  drawText("Hand Movement Screening Tool", W / 2 - Math.min(220, W * 0.35), H * 0.2, "#ffffff", 32);
+  drawText("Choose a test:", W / 2 - Math.min(80, W * 0.15), H * 0.3, "#c8c8c8", 20);
 
   const buttons = getMenuButtons();
   drawButton(buttons.tremor, "1: Tremor / Writing Jitter");
   drawButton(buttons.tap, "2: Finger Tap Test");
   drawButton(buttons.spiral, "3: Spiral Trace Test");
 
-  drawText("Press 1, 2, 3 or click a button", W / 2 - 130, 540, "#b4b4b4", 16);
-  drawText(DISCLAIMER, W / 2 - 150, 580, COLOR.disclaimer, 16);
+  drawText("Press 1, 2, 3 or click a button", W / 2 - Math.min(130, W * 0.2), H * 0.82, "#b4b4b4", 16);
+  drawText(DISCLAIMER, W / 2 - Math.min(150, W * 0.25), H * 0.88, COLOR.disclaimer, 16);
 }
 
 function handleMenuClick(x, y) {
@@ -322,7 +331,9 @@ const tapTest = {
   },
 
   render() {
-    this.startButton = [W/2-160, H-140, W/2+160, H-90];
+    const btnW = Math.min(320, W * 0.5);
+    const btnH = Math.min(50, H * 0.08);
+    this.startButton = [W/2 - btnW/2, H - H*0.2, W/2 + btnW/2, H - H*0.2 + btnH];
 
     if (this.state === "waiting") {
       drawText("Get your hand in frame, then click Start or press SPACE", 30, 50, "#22c55e", 22);
@@ -335,8 +346,8 @@ const tapTest = {
       const elapsed = performance.now()/1000 - this.runStart;
       const remaining = A.TAP_TEST_DURATION - elapsed;
       drawText(`TAP! Time left: ${remaining.toFixed(1)}s`, 30, 50, COLOR.info, 24);
-      const barW = Math.max(0, 400 * (elapsed / A.TAP_TEST_DURATION));
-      ctx.strokeStyle = "#505050"; ctx.strokeRect(30, 65, 400, 15);
+      const barW = Math.max(0, (W * 0.4) * (elapsed / A.TAP_TEST_DURATION));
+      ctx.strokeStyle = "#505050"; ctx.strokeRect(30, 65, W * 0.4, 15);
       ctx.fillStyle = COLOR.info; ctx.fillRect(30, 65, barW, 15);
     } else if (this.state === "done") {
       let y = 50;
@@ -422,7 +433,6 @@ const spiralTest = {
     if (!this.spiralRef) this.reset();
     this.warnings = [];
 
-    // Dark background instead of live video for this test
     ctx.fillStyle = "#141414";
     ctx.fillRect(0, 0, W, H);
 
@@ -468,7 +478,9 @@ const spiralTest = {
   },
 
   render() {
-    this.startButton = [W/2-160, H-140, W/2+160, H-90];
+    const btnW = Math.min(320, W * 0.5);
+    const btnH = Math.min(50, H * 0.08);
+    this.startButton = [W/2 - btnW/2, H - H*0.2, W/2 + btnW/2, H - H*0.2 + btnH];
 
     if (this.state === "waiting") {
       drawText("Get your fingertip in frame, then click Start or press SPACE", 30, 50, "#22c55e", 20);
@@ -556,9 +568,6 @@ async function detectAndDraw() {
     return;
   }
 
-  // Draw a horizontally-mirrored copy of the video into procCanvas, then
-  // run detection on THAT -- so landmark coordinates already match the
-  // mirrored view the user sees.
   procCtx.save();
   procCtx.translate(W, 0);
   procCtx.scale(-1, 1);
@@ -569,7 +578,6 @@ async function detectAndDraw() {
   let handsLandmarks = [];
 
   if (handLandmarker) {
-    // Ensure strictly increasing timestamps for MediaPipe WASM execution
     let nowMs = performance.now();
     if (nowMs <= lastTimestamp) {
       nowMs = lastTimestamp + 1;
@@ -628,7 +636,35 @@ window.addEventListener("keydown", (e) => {
   else if (appState === "spiral") spiralTest.handleKey(e.key);
 });
 
-// ---------------- Startup ----------------
+// ---------------- Startup with Multi-Aspect Ratio Fallback Sequence ----------------
+
+async function getCameraStreamWithFallback() {
+  // Comprehensive list of common aspect ratios across desktop webcams, smartphones, and tablet cameras
+  const aspectRatios = [
+    { name: "16:9 Landscape HD", constraints: { width: { ideal: 1280 }, height: { ideal: 720 }, aspectRatio: { ideal: 16/9 } } },
+    { name: "4:3 Standard Web", constraints: { width: { ideal: 640 }, height: { ideal: 480 }, aspectRatio: { ideal: 4/3 } } },
+    { name: "1:1 Square Mobile", constraints: { width: { ideal: 720 }, height: { ideal: 720 }, aspectRatio: { ideal: 1/1 } } },
+    { name: "18:9 Widescreen Mobile", constraints: { width: { ideal: 1440 }, height: { ideal: 720 }, aspectRatio: { ideal: 18/9 } } },
+    { name: "21:9 Ultra-Wide", constraints: { width: { ideal: 1280 }, height: { ideal: 540 }, aspectRatio: { ideal: 21/9 } } },
+  ];
+
+  for (const config of aspectRatios) {
+    try {
+      console.log(`Attempting camera access with ${config.name}...`);
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { ...config.constraints, facingMode: "user" },
+      });
+      console.log(`Camera initialized successfully using ${config.name}`);
+      return stream;
+    } catch (err) {
+      console.warn(`Camera request failed for ${config.name}:`, err.name || err.message);
+    }
+  }
+
+  // Ultimate fallback: open default camera without any media constraint limitations
+  console.log("Falling back to unconstrained default video media stream...");
+  return await navigator.mediaDevices.getUserMedia({ video: true });
+}
 
 async function init() {
   try {
@@ -637,7 +673,6 @@ async function init() {
       "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm"
     );
 
-    // Initial attempt with GPU acceleration
     try {
       handLandmarker = await HandLandmarker.createFromOptions(vision, {
         baseOptions: {
@@ -662,18 +697,7 @@ async function init() {
     }
 
     statusLine.textContent = "Requesting camera access...";
-
-    let stream;
-    try {
-      // Primary attempt: Request HD resolution
-      stream = await navigator.mediaDevices.getUserMedia({
-        video: { width: { ideal: 1280 }, height: { ideal: 720 }, facingMode: "user" },
-      });
-    } catch (hdErr) {
-      console.warn("HD camera constraint failed, attempting basic camera access:", hdErr);
-      // Fallback attempt: Request default camera feed without strict resolution parameters
-      stream = await navigator.mediaDevices.getUserMedia({ video: true });
-    }
+    const stream = await getCameraStreamWithFallback();
 
     video.srcObject = stream;
 
