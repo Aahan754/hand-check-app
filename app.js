@@ -2,7 +2,7 @@ import { HandLandmarker, FilesetResolver } from "https://cdn.jsdelivr.net/npm/@m
 
 const A = window.HandAnalysis;
 
-// ---------------- DOM setup ----------------
+// ---------------- DOM Setup ----------------
 
 const video = document.getElementById("webcam");
 const canvas = document.getElementById("overlay");
@@ -12,23 +12,23 @@ const statusLine = document.getElementById("status-line");
 const procCanvas = document.createElement("canvas");
 const procCtx = procCanvas.getContext("2d", { willReadFrequently: true });
 
-// ---------------- Colors ----------------
+// ---------------- Styling Constants ----------------
 
 const COLOR = {
-  bone: "#ffffff",
-  joint: "#ffa500",
-  warning: "#ff3b30",
-  info: "#00e5ff",
-  good: "#22c55e",
-  disclaimer: "#8c8c8c",
-  button: "#ff7800",
-  buttonHover: "#ffa040",
+  bone: "#38bdf8",
+  joint: "#f59e0b",
+  warning: "#ef4444",
+  info: "#06b6d4",
+  good: "#10b981",
+  disclaimer: "#64748b",
+  button: "#0284c7",
+  buttonHover: "#0369a1",
   buttonText: "#ffffff",
 };
 
 const DISCLAIMER = "Movement metrics only -- not a medical diagnosis";
 
-// ---------------- App state ----------------
+// ---------------- App State ----------------
 
 let appState = "loading";
 let handLandmarker = null;
@@ -55,7 +55,13 @@ function fitCanvasToVideo() {
   procCanvas.height = H;
 }
 
-// ---------------- Shared drawing helpers ----------------
+function checkHandDistance(scale) {
+  if (scale < 0.10) return "Move hand closer to camera";
+  if (scale > 0.40) return "Move hand further back";
+  return null;
+}
+
+// ---------------- Drawing Helpers ----------------
 
 const HAND_CONNECTIONS = [
   [0,1],[1,2],[2,3],[3,4],
@@ -90,53 +96,52 @@ function checkNearEdge(landmarks, margin = 0.03) {
   );
 }
 
-function drawText(text, x, y, color, size = 20) {
+function drawText(text, x, y, color, size = 18) {
   const scaledSize = Math.max(12, Math.round(size * (H / 480)));
-  ctx.font = `${scaledSize}px -apple-system, sans-serif`;
+  ctx.font = `600 ${scaledSize}px -apple-system, sans-serif`;
   ctx.fillStyle = color;
   ctx.fillText(text, x, y);
 }
 
 function drawDisclaimer() {
-  drawText(DISCLAIMER, 10, H - 15, COLOR.disclaimer, 15);
+  drawText(DISCLAIMER, 10, H - 15, COLOR.disclaimer, 14);
 }
 
 function drawHelpLine(text) {
-  drawText(text, 10, H - 42, COLOR.disclaimer, 15);
+  drawText(text, 10, H - 38, COLOR.disclaimer, 14);
 }
 
 function drawButton(rect, label) {
   const [x1, y1, x2, y2] = rect;
   const hovering = mousePos.x >= x1 && mousePos.x <= x2 && mousePos.y >= y1 && mousePos.y <= y2;
-  ctx.fillStyle = hovering ? COLOR.buttonHover : COLOR.button;
-  ctx.fillRect(x1, y1, x2 - x1, y2 - y1);
-  ctx.strokeStyle = "#ffffff";
-  ctx.lineWidth = 2;
-  ctx.strokeRect(x1, y1, x2 - x1, y2 - y1);
   
-  const fontSize = Math.max(14, Math.round(20 * (H / 480)));
-  ctx.font = `${fontSize}px -apple-system, sans-serif`;
+  ctx.fillStyle = hovering ? COLOR.buttonHover : COLOR.button;
+  ctx.beginPath();
+  ctx.roundRect(x1, y1, x2 - x1, y2 - y1, 8);
+  ctx.fill();
+
+  const fontSize = Math.max(14, Math.round(18 * (H / 480)));
+  ctx.font = `600 ${fontSize}px -apple-system, sans-serif`;
   ctx.fillStyle = COLOR.buttonText;
   ctx.textAlign = "center";
   ctx.textBaseline = "middle";
   ctx.fillText(label, (x1 + x2) / 2, (y1 + y2) / 2);
   ctx.textAlign = "left";
   ctx.textBaseline = "alphabetic";
-  return hovering;
 }
 
 function pointInRect([x1, y1, x2, y2], x, y) {
   return x >= x1 && x <= x2 && y >= y1 && y <= y2;
 }
 
-// ---------------- Dynamic Layout & Menu ----------------
+// ---------------- Menu Setup ----------------
 
 function getMenuButtons() {
-  const btnW = Math.min(400, W * 0.6);
-  const btnH = Math.min(60, H * 0.08);
+  const btnW = Math.min(360, W * 0.65);
+  const btnH = Math.min(50, H * 0.1);
   const centerX = W / 2;
-  const startY = H * 0.38;
-  const gap = btnH + 20;
+  const startY = H * 0.35;
+  const gap = btnH + 16;
 
   return {
     tremor: [centerX - btnW / 2, startY, centerX + btnW / 2, startY + btnH],
@@ -146,19 +151,19 @@ function getMenuButtons() {
 }
 
 function renderMenu() {
-  ctx.fillStyle = "#1e1e1e";
+  ctx.fillStyle = "#0f172a";
   ctx.fillRect(0, 0, W, H);
   
-  drawText("Hand Movement Screening Tool", W / 2 - Math.min(220, W * 0.35), H * 0.2, "#ffffff", 28);
-  drawText("Choose a test:", W / 2 - Math.min(80, W * 0.15), H * 0.3, "#c8c8c8", 18);
+  drawText("Hand Movement Assessment", W / 2 - Math.min(180, W * 0.3), H * 0.18, "#f8fafc", 24);
+  drawText("Select an evaluation test:", W / 2 - Math.min(100, W * 0.2), H * 0.27, "#94a3b8", 16);
 
   const buttons = getMenuButtons();
-  drawButton(buttons.tremor, "1: Tremor / Writing Jitter");
-  drawButton(buttons.tap, "2: Finger Tap Test");
-  drawButton(buttons.spiral, "3: Spiral Trace Test");
+  drawButton(buttons.tremor, "1: Tremor & Jitter Evaluation");
+  drawButton(buttons.tap, "2: Finger Tap Rhythm Test");
+  drawButton(buttons.spiral, "3: Spiral Trace Accuracy");
 
-  drawText("Press 1, 2, 3 or click a button", W / 2 - Math.min(130, W * 0.2), H * 0.82, "#b4b4b4", 15);
-  drawText(DISCLAIMER, W / 2 - Math.min(150, W * 0.25), H * 0.88, COLOR.disclaimer, 15);
+  drawText("Press 1, 2, 3 or click to select", W / 2 - Math.min(110, W * 0.2), H * 0.82, "#64748b", 14);
+  drawDisclaimer();
 }
 
 function handleMenuClick(x, y) {
@@ -194,7 +199,7 @@ function returnToMenu() {
 }
 
 // ============================================================
-// 1. Tremor / Writing Jitter Test
+// 1. Tremor Test Module
 // ============================================================
 
 const tremorTest = {
@@ -216,25 +221,33 @@ const tremorTest = {
     this.lastAnalysisResults = [null, null];
   },
 
-  update(handsLandmarks, now) {
+  update(handsLandmarks, worldLandmarks, now) {
     this.warnings = [];
     this.readouts = [];
     const currentHandCount = handsLandmarks.length;
 
     const shouldRunAnalysis = now - this.lastAnalysisTime > 0.1;
-    if (shouldRunAnalysis) {
-      this.lastAnalysisTime = now;
-    }
+    if (shouldRunAnalysis) this.lastAnalysisTime = now;
 
     handsLandmarks.slice(0, 2).forEach((landmarks, idx) => {
       drawHand(landmarks);
+      
       if (checkNearEdge(landmarks)) {
-        this.warnings.push(`Hand ${idx+1} not fully in frame -- move hand toward center`);
+        this.warnings.push(`Hand ${idx+1}: Keep hand inside camera center`);
+      }
+
+      if (worldLandmarks && worldLandmarks[idx] && !A.isHandFlat(worldLandmarks[idx])) {
+        this.warnings.push(`Hand ${idx+1}: Keep palm flat facing camera`);
       }
       
       const scale = A.handScaleOfAspect(landmarks, aspectRatio);
+      const distWarning = checkHandDistance(scale);
+      if (distWarning) this.warnings.push(`Hand ${idx+1}: ${distWarning}`);
+
       const tip = landmarks[8];
-      let tipXY = [tip.x, tip.y];
+      const rawTip = [tip.x, tip.y];
+
+      let tipXY = A.smoothPoint(this.lastValidXY[idx], rawTip, 0.4);
 
       if (!A.rejectOutlier(this.lastValidXY[idx], tipXY, scale, 1.8, aspectRatio)) {
         tipXY = this.lastValidXY[idx];
@@ -252,15 +265,15 @@ const tremorTest = {
 
       const result = this.lastAnalysisResults[idx];
       if (!result) {
-        this.readouts.push([`Hand ${idx+1}: collecting data... (${buf.length} samples)`, COLOR.info]);
+        this.readouts.push([`Hand ${idx+1}: Collecting samples (${buf.length})...`, COLOR.info]);
       } else if (result.status === "fps_too_low") {
-        this.readouts.push([`Hand ${idx+1}: camera too slow (${result.rawFps.toFixed(0)} fps) for a reliable reading`, COLOR.warning]);
+        this.readouts.push([`Hand ${idx+1}: Low camera FPS (${result.rawFps.toFixed(0)})`, COLOR.warning]);
       } else if (result.confident) {
-        this.readouts.push([`Hand ${idx+1}: ${result.freqHz.toFixed(1)} Hz jitter, amp ${result.amplitudePct.toFixed(1)}% (conf ${result.bandRatio.toFixed(2)}, ${result.rawFps.toFixed(0)} fps)`, COLOR.info]);
+        this.readouts.push([`Hand ${idx+1}: ${result.freqHz.toFixed(1)} Hz Jitter | Amp: ${result.amplitudePct.toFixed(1)}% (${result.rawFps.toFixed(0)} FPS)`, COLOR.info]);
       } else if (!result.hasFpsHeadroom) {
-        this.readouts.push([`Hand ${idx+1}: ${result.rawFps.toFixed(0)} fps -- borderline, treat as unreliable`, COLOR.warning]);
+        this.readouts.push([`Hand ${idx+1}: FPS borderline (${result.rawFps.toFixed(0)})`, COLOR.warning]);
       } else {
-        this.readouts.push([`Hand ${idx+1}: no clear jitter (peak ${result.freqHz.toFixed(1)} Hz, conf ${result.bandRatio.toFixed(2)})`, COLOR.info]);
+        this.readouts.push([`Hand ${idx+1}: No significant jitter detected`, COLOR.good]);
       }
     });
 
@@ -272,16 +285,16 @@ const tremorTest = {
     if (currentHandCount < this.prevHandCount && this.prevHandCount > 0) this.lastDropTime = now;
     this.prevHandCount = currentHandCount;
     if (now - this.lastDropTime < 1.5) {
-      this.warnings.push("Lost track of a hand -- possible overlap or occlusion");
+      this.warnings.push("Lost tracking frame -- avoid fast occlusion");
     }
   },
 
   render(handCount) {
-    drawText(`Hands: ${handCount}`, 10, 30, "#22c55e", 20);
-    let y = 60;
-    for (const w of this.warnings) { drawText(w, 10, y, COLOR.warning, 18); y += 22; }
-    for (const [text, color] of this.readouts) { drawText(text, 10, y, color, 18); y += 22; }
-    drawHelpLine("q/Esc: menu    r: restart");
+    drawText(`Active Hands: ${handCount}`, 10, 28, COLOR.good, 18);
+    let y = 56;
+    for (const w of this.warnings) { drawText(w, 10, y, COLOR.warning, 16); y += 22; }
+    for (const [text, color] of this.readouts) { drawText(text, 10, y, color, 16); y += 22; }
+    drawHelpLine("Q/ESC: Main Menu  |  R: Reset Test");
     drawDisclaimer();
   },
 
@@ -292,7 +305,7 @@ const tremorTest = {
 };
 
 // ============================================================
-// 2. Finger Tap Test
+// 2. Finger Tap Module
 // ============================================================
 
 const tapTest = {
@@ -320,7 +333,7 @@ const tapTest = {
     if (handsLandmarks.length > 0) {
       const landmarks = handsLandmarks[0];
       drawHand(landmarks);
-      if (checkNearEdge(landmarks)) this.warnings.push("Hand not fully in frame");
+      if (checkNearEdge(landmarks)) this.warnings.push("Keep hand centered in view");
       
       const scale = A.handScaleOfAspect(landmarks, aspectRatio);
       const thumb = landmarks[4], index = landmarks[8];
@@ -351,52 +364,50 @@ const tapTest = {
   },
 
   render() {
-    const btnW = Math.min(320, W * 0.5);
-    const btnH = Math.min(50, H * 0.08);
-    this.startButton = [W/2 - btnW/2, H - H*0.2, W/2 + btnW/2, H - H*0.2 + btnH];
+    const btnW = Math.min(280, W * 0.45);
+    const btnH = Math.min(46, H * 0.09);
+    this.startButton = [W/2 - btnW/2, H - H*0.22, W/2 + btnW/2, H - H*0.22 + btnH];
 
     if (this.state === "waiting") {
-      drawText("Get your hand in frame, then click Start or press SPACE", 30, 50, "#22c55e", 20);
-      drawText("Tap thumb and index finger together repeatedly, as fast as you can", 30, 85, "#c8c8c8", 16);
+      drawText("Position hand in frame and click Start", 20, 40, COLOR.good, 18);
+      drawText("Tap thumb and index finger repeatedly as fast as possible", 20, 68, "#94a3b8", 15);
       drawButton(this.startButton, "Start Test");
     } else if (this.state === "countdown") {
       const remaining = Math.ceil(3 - (performance.now()/1000 - this.countdownStart));
-      drawText(`Starting in ${Math.max(remaining,1)}...`, 30, 50, COLOR.info, 26);
+      drawText(`Starting in ${Math.max(remaining,1)}...`, 20, 40, COLOR.info, 24);
     } else if (this.state === "running") {
       const elapsed = performance.now()/1000 - this.runStart;
       const remaining = A.TAP_TEST_DURATION - elapsed;
-      drawText(`TAP! Time left: ${remaining.toFixed(1)}s`, 30, 50, COLOR.info, 22);
+      drawText(`TAP NOW! Time remaining: ${remaining.toFixed(1)}s`, 20, 40, COLOR.info, 20);
       const barW = Math.max(0, (W * 0.4) * (elapsed / A.TAP_TEST_DURATION));
-      ctx.strokeStyle = "#505050"; ctx.strokeRect(30, 65, W * 0.4, 15);
-      ctx.fillStyle = COLOR.info; ctx.fillRect(30, 65, barW, 15);
+      ctx.fillStyle = "#334155"; ctx.fillRect(20, 55, W * 0.4, 12);
+      ctx.fillStyle = COLOR.info; ctx.fillRect(20, 55, barW, 12);
     } else if (this.state === "done") {
-      let y = 50;
+      let y = 40;
       const r = this.result;
-      if (!r || r.error) {
-        drawText("Not enough data captured -- press r to retry", 30, y, COLOR.warning, 18);
-      } else if (r.insufficient) {
-        drawText(`Only ${r.numTaps} taps detected -- press r to retry`, 30, y, COLOR.warning, 18);
+      if (!r || r.error || r.insufficient) {
+        drawText("Insufficient tap data captured — Press R to retry", 20, y, COLOR.warning, 18);
       } else {
         const lines = [
-          [`Taps detected: ${r.numTaps}`, COLOR.good],
-          [`Average tap rate: ${r.avgRateHz.toFixed(2)} Hz`, COLOR.good],
-          [`Amplitude change (first vs last): ${r.ampDecrementPct >= 0 ? "+" : ""}${r.ampDecrementPct.toFixed(1)}%`, COLOR.info],
+          [`Taps Counted: ${r.numTaps}`, COLOR.good],
+          [`Average Frequency: ${r.avgRateHz.toFixed(2)} Hz`, COLOR.good],
+          [`Amplitude Delta: ${r.ampDecrementPct >= 0 ? "+" : ""}${r.ampDecrementPct.toFixed(1)}%`, COLOR.info],
         ];
         if (r.rateSlowingPct !== null) {
-          lines.push([`Rate change (first vs last): ${r.rateSlowingPct >= 0 ? "+" : ""}${r.rateSlowingPct.toFixed(1)}%`, COLOR.info]);
+          lines.push([`Rate Change: ${r.rateSlowingPct >= 0 ? "+" : ""}${r.rateSlowingPct.toFixed(1)}%`, COLOR.info]);
         }
         lines.push(r.decrementPattern
-          ? ["Decrement pattern observed (amplitude shrank >20%)", COLOR.warning]
-          : ["No strong decrement pattern in this trial", COLOR.good]);
-        for (const [text, color] of lines) { drawText(text, 30, y, color, 18); y += 26; }
+          ? ["Decrement observed (Amplitude drop > 20%)", COLOR.warning]
+          : ["Stable tap rhythm maintained", COLOR.good]);
+        for (const [text, color] of lines) { drawText(text, 20, y, color, 16); y += 24; }
       }
-      drawText("Press r to retry", 30, y + 10, "#c8c8c8", 16);
+      drawText("Press R to run test again", 20, y + 10, "#94a3b8", 14);
     }
 
-    let y = 120;
-    for (const w of this.warnings) { drawText(w, 10, y, COLOR.warning, 16); y += 20; }
+    let y = 110;
+    for (const w of this.warnings) { drawText(w, 10, y, COLOR.warning, 15); y += 20; }
 
-    drawHelpLine("SPACE: start    q/Esc: menu    r: restart");
+    drawHelpLine("SPACE: Start  |  Q/ESC: Main Menu  |  R: Reset");
     drawDisclaimer();
   },
 
@@ -418,7 +429,7 @@ const tapTest = {
 };
 
 // ============================================================
-// 3. Spiral Trace Test
+// 3. Spiral Test Module
 // ============================================================
 
 const SPIRAL_TURNS = 3;
@@ -453,11 +464,11 @@ const spiralTest = {
     if (!this.spiralRef) this.reset();
     this.warnings = [];
 
-    ctx.fillStyle = "#141414";
+    ctx.fillStyle = "#0f172a";
     ctx.fillRect(0, 0, W, H);
 
-    ctx.strokeStyle = "#5a5a5a";
-    ctx.lineWidth = 1;
+    ctx.strokeStyle = "#334155";
+    ctx.lineWidth = 2;
     ctx.beginPath();
     this.spiralRef.forEach((p, i) => { if (i === 0) ctx.moveTo(p[0], p[1]); else ctx.lineTo(p[0], p[1]); });
     ctx.stroke();
@@ -465,7 +476,7 @@ const spiralTest = {
     if (handsLandmarks.length > 0) {
       const landmarks = handsLandmarks[0];
       drawHand(landmarks);
-      if (checkNearEdge(landmarks)) this.warnings.push("Hand not fully in frame");
+      if (checkNearEdge(landmarks)) this.warnings.push("Keep hand centered");
       
       const scale = A.handScaleOfAspect(landmarks, aspectRatio);
       const tip = landmarks[8];
@@ -488,10 +499,10 @@ const spiralTest = {
         this.deviationSamples.push(dist);
       }
     } else if (this.state === "running") {
-      this.warnings.push("No hand detected -- hold index fingertip over spiral");
+      this.warnings.push("Hand not detected in frame");
     }
 
-    ctx.strokeStyle = "#ffc800";
+    ctx.strokeStyle = "#f59e0b";
     ctx.lineWidth = 2;
     ctx.beginPath();
     this.tracePoints.forEach((p, i) => { if (i === 0) ctx.moveTo(p[0], p[1]); else ctx.lineTo(p[0], p[1]); });
@@ -499,60 +510,52 @@ const spiralTest = {
   },
 
   render() {
-    const btnW = Math.min(320, W * 0.5);
-    const btnH = Math.min(50, H * 0.08);
-    this.startButton = [W/2 - btnW/2, H - H*0.2, W/2 + btnW/2, H - H*0.2 + btnH];
+    const btnW = Math.min(280, W * 0.45);
+    const btnH = Math.min(46, H * 0.09);
+    this.startButton = [W/2 - btnW/2, H - H*0.22, W/2 + btnW/2, H - H*0.22 + btnH];
 
     if (this.state === "waiting") {
-      drawText("Get your fingertip in frame, then click Start or press SPACE", 30, 50, "#22c55e", 18);
-      drawText("Trace the gray spiral with your index fingertip", 30, 80, "#c8c8c8", 16);
+      drawText("Position index finger over spiral center", 20, 36, COLOR.good, 18);
+      drawText("Trace along gray line smoothly", 20, 62, "#94a3b8", 15);
       drawButton(this.startButton, "Start Test");
     } else if (this.state === "running") {
       const elapsed = performance.now()/1000 - this.runStart;
       const remaining = SPIRAL_MAX_DURATION - elapsed;
-      drawText(`Tracing... time left: ${remaining.toFixed(1)}s (press F when finished)`, 30, 40, COLOR.info, 18);
+      drawText(`Tracing... ${remaining.toFixed(1)}s remaining (Press F when complete)`, 20, 36, COLOR.info, 16);
       if (this.deviationSamples.length) {
         const meanDev = A.mean(this.deviationSamples);
-        drawText(`Live avg deviation: ${meanDev.toFixed(1)}px (${(meanDev/this.spiralMaxRadius*100).toFixed(1)}% of radius)`, 30, 65, COLOR.info, 15);
+        drawText(`Average Deviation: ${meanDev.toFixed(1)}px`, 20, 58, COLOR.info, 14);
       }
       if (remaining <= 0) this.state = "done";
     } else if (this.state === "done") {
-      let y = 40;
+      let y = 36;
       if (this.deviationSamples.length < 10) {
-        drawText("Not enough tracing captured -- press r to retry", 30, y, COLOR.warning, 18);
+        drawText("Insufficient trace samples captured — Press R to retry", 20, y, COLOR.warning, 16);
       } else {
         const meanDev = A.mean(this.deviationSamples);
         const maxDev = Math.max(...this.deviationSamples);
-        const meanDevPct = meanDev / this.spiralMaxRadius * 100;
-        const maxDevPct = maxDev / this.spiralMaxRadius * 100;
 
         const lines = [
-          [`Mean deviation from spiral: ${meanDev.toFixed(1)}px (${meanDevPct.toFixed(1)}% of radius)`, COLOR.good],
-          [`Max deviation from spiral: ${maxDev.toFixed(1)}px (${maxDevPct.toFixed(1)}% of radius)`, COLOR.info],
+          [`Mean Error: ${meanDev.toFixed(1)}px (${(meanDev/this.spiralMaxRadius*100).toFixed(1)}% radius)`, COLOR.good],
+          [`Peak Error: ${maxDev.toFixed(1)}px (${(maxDev/this.spiralMaxRadius*100).toFixed(1)}% radius)`, COLOR.info],
         ];
 
         const jitterResult = this.tremorBuffer.length ? A.analyzeTremor(this.tremorBuffer) : null;
-        if (jitterResult) {
-          if (jitterResult.status === "fps_too_low") {
-            lines.push([`Camera too slow (${jitterResult.rawFps.toFixed(0)} fps) for a reliable jitter reading`, COLOR.warning]);
-          } else if (jitterResult.confident) {
-            lines.push([`Jitter while tracing: ${jitterResult.freqHz.toFixed(1)} Hz (confidence ${jitterResult.bandRatio.toFixed(2)})`, COLOR.warning]);
-          } else if (!jitterResult.hasFpsHeadroom) {
-            lines.push([`${jitterResult.rawFps.toFixed(0)} fps -- borderline, jitter reading may be unreliable`, COLOR.warning]);
-          } else {
-            lines.push(["No clear jitter detected while tracing", COLOR.good]);
-          }
+        if (jitterResult && jitterResult.confident) {
+          lines.push([`Tracing Jitter Detected: ${jitterResult.freqHz.toFixed(1)} Hz`, COLOR.warning]);
+        } else {
+          lines.push(["Smooth tracing motion without significant jitter", COLOR.good]);
         }
 
-        for (const [text, color] of lines) { drawText(text, 30, y, color, 18); y += 26; }
+        for (const [text, color] of lines) { drawText(text, 20, y, color, 16); y += 24; }
       }
-      drawText("Press r to retry", 30, y + 10, "#c8c8c8", 16);
+      drawText("Press R to retry test", 20, y + 10, "#94a3b8", 14);
     }
 
-    let y = 110;
-    for (const w of this.warnings) { drawText(w, 10, y, COLOR.warning, 16); y += 20; }
+    let y = 96;
+    for (const w of this.warnings) { drawText(w, 10, y, COLOR.warning, 15); y += 20; }
 
-    drawHelpLine("SPACE: start    F: finish early    q/Esc: menu    r: restart");
+    drawHelpLine("SPACE: Start  |  F: Finish Early  |  Q/ESC: Main Menu  |  R: Reset");
     drawDisclaimer();
   },
 
@@ -581,7 +584,7 @@ const spiralTest = {
   },
 };
 
-// ---------------- Main loop ----------------
+// ---------------- Main Execution Loop ----------------
 
 async function detectAndDraw() {
   if (video.readyState < 2) {
@@ -597,6 +600,7 @@ async function detectAndDraw() {
 
   const now = performance.now() / 1000;
   let handsLandmarks = [];
+  let worldLandmarks = [];
 
   if (handLandmarker) {
     let nowMs = performance.now();
@@ -608,8 +612,9 @@ async function detectAndDraw() {
     try {
       const result = handLandmarker.detectForVideo(procCanvas, nowMs);
       handsLandmarks = result.landmarks || [];
+      worldLandmarks = result.worldLandmarks || [];
     } catch (detectErr) {
-      console.warn("HandLandmarker tracking error:", detectErr);
+      console.warn("Tracking detection frame skip:", detectErr);
     }
   }
 
@@ -618,7 +623,7 @@ async function detectAndDraw() {
   if (appState === "menu") {
     renderMenu();
   } else if (appState === "tremor") {
-    tremorTest.update(handsLandmarks, now);
+    tremorTest.update(handsLandmarks, worldLandmarks, now);
     tremorTest.render(handsLandmarks.length);
   } else if (appState === "tap") {
     tapTest.update(handsLandmarks, now);
@@ -631,7 +636,7 @@ async function detectAndDraw() {
   requestAnimationFrame(detectAndDraw);
 }
 
-// ---------------- Input handling ----------------
+// ---------------- User Input Handlers ----------------
 
 canvas.addEventListener("mousemove", (e) => {
   const rect = canvas.getBoundingClientRect();
@@ -657,30 +662,29 @@ window.addEventListener("keydown", (e) => {
   else if (appState === "spiral") spiralTest.handleKey(e.key);
 });
 
-// ---------------- Startup with High FPS SD Fallback ----------------
+// ---------------- System Initialization ----------------
 
 async function getCameraStreamWithFallback() {
   const profiles = [
-    { name: "SD High FPS 4:3", constraints: { video: { width: { ideal: 640 }, height: { ideal: 480 }, frameRate: { ideal: 60, min: 30 } } } },
-    { name: "Basic Video", constraints: { video: true } },
-    { name: "Bare Minimum Constraints", constraints: { video: {} } }
+    { name: "SD Performance 4:3", constraints: { video: { width: { ideal: 640 }, height: { ideal: 480 }, frameRate: { ideal: 60, min: 30 } } } },
+    { name: "Basic Stream", constraints: { video: true } },
+    { name: "Fallback Stream", constraints: { video: {} } }
   ];
 
   for (const profile of profiles) {
     try {
-      const stream = await navigator.mediaDevices.getUserMedia(profile.constraints);
-      return stream;
+      return await navigator.mediaDevices.getUserMedia(profile.constraints);
     } catch (err) {
-      console.warn(`Profile failed (${profile.name}):`, err.name, err.message);
+      console.warn(`Profile unsupported (${profile.name}):`, err.message);
     }
   }
 
-  throw new Error("No compatible camera stream could be established.");
+  throw new Error("No usable camera hardware detected.");
 }
 
 async function init() {
   try {
-    statusLine.textContent = "Loading hand tracking model...";
+    statusLine.textContent = "Loading tracking models...";
     const vision = await FilesetResolver.forVisionTasks(
       "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm"
     );
@@ -696,10 +700,10 @@ async function init() {
         numHands: 2,
       });
     } catch (modelErr) {
-      console.warn("Failed to initialize hand landmarker model:", modelErr);
+      console.warn("CPU delegate setup warning:", modelErr);
     }
 
-    statusLine.textContent = "Requesting camera access...";
+    statusLine.textContent = "Connecting camera...";
     const stream = await getCameraStreamWithFallback();
 
     video.srcObject = stream;
@@ -716,15 +720,13 @@ async function init() {
     fitCanvasToVideo();
     window.addEventListener("resize", fitCanvasToVideo);
 
-    statusLine.textContent = "";
+    statusLine.textContent = "System Ready";
     appState = "menu";
     detectAndDraw();
   } catch (err) {
-    console.error("Camera/Initialization error:", err);
-    statusLine.innerHTML =
-      `Error: ${err.message}<br>` +
-      `<small style="color: #b4b4b4;">Camera hardware not detected or access blocked. Please verify permissions and ensure no other application is using the camera.</small><br>` +
-      `<button onclick="location.reload()" style="margin-top:10px; padding:6px 16px; background:#ff7800; color:#fff; border:none; border-radius:4px; cursor:pointer;">Retry Camera Access</button>`;
+    console.error("Initialization failure:", err);
+    statusLine.textContent = "Hardware Access Error";
+    statusLine.style.color = COLOR.warning;
   }
 }
 
