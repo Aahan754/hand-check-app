@@ -1,5 +1,5 @@
 // analysis.js
-// Tremor/jitter detection, tap detection, and spiral deviation. Pure math, no DOM/camera dependencies.
+// Signal processing, geometry calculations, and tremor analysis.
 
 function realDFT(signal, sampleRateHz) {
   const N = signal.length;
@@ -71,20 +71,25 @@ function std(arr) {
 }
 function ptp(arr) { return arr.length ? Math.max(...arr) - Math.min(...arr) : 0; }
 
-// ---------------- Aspect-Corrected Geometry Helpers ----------------
+// ---------------- Aspect & Pose Corrected Geometry Helpers ----------------
 
-function distanceAspect(p1, p2, aspectRatio = 16 / 9) {
-  const dx = ((p1.x !== undefined ? p1.x : p1[0]) - (p2.x !== undefined ? p2.x : p2[0])) * aspectRatio;
-  const dy = (p1.y !== undefined ? p1.y : p1[1]) - (p2.y !== undefined ? p2.y : p2[1]);
+function distanceAspect(p1, p2, aspectRatio = 4 / 3) {
+  const x1 = p1.x !== undefined ? p1.x : p1[0];
+  const y1 = p1.y !== undefined ? p1.y : p1[1];
+  const x2 = p2.x !== undefined ? p2.x : p2[0];
+  const y2 = p2.y !== undefined ? p2.y : p2[1];
+  
+  const dx = (x1 - x2) * aspectRatio;
+  const dy = y1 - y2;
   return Math.hypot(dx, dy);
 }
 
-function handScaleOfAspect(landmarks, aspectRatio = 16 / 9) {
+function handScaleOfAspect(landmarks, aspectRatio = 4 / 3) {
   if (!landmarks || landmarks.length < 10) return 0;
   return distanceAspect(landmarks[0], landmarks[9], aspectRatio);
 }
 
-function rejectOutlier(prevXY, newXY, scale, maxNormJump = 1.8, aspectRatio = 16 / 9) {
+function rejectOutlier(prevXY, newXY, scale, maxNormJump = 1.8, aspectRatio = 4 / 3) {
   if (!prevXY || !scale || scale <= 0) return true;
   const p1 = { x: prevXY[0], y: prevXY[1] };
   const p2 = { x: newXY[0], y: newXY[1] };
@@ -92,7 +97,25 @@ function rejectOutlier(prevXY, newXY, scale, maxNormJump = 1.8, aspectRatio = 16
   return jump < maxNormJump;
 }
 
-// ---------------- Tremor / jitter analysis ----------------
+function smoothPoint(prevPoint, newPoint, alpha = 0.4) {
+  if (!prevPoint) return newPoint;
+  return [
+    prevPoint[0] + alpha * (newPoint[0] - prevPoint[0]),
+    prevPoint[1] + alpha * (newPoint[1] - prevPoint[1])
+  ];
+}
+
+function isHandFlat(landmarks3D, maxTiltRatio = 0.45) {
+  if (!landmarks3D || landmarks3D.length < 10) return true;
+  const zDiff = Math.abs(landmarks3D[0].z - landmarks3D[9].z);
+  const xyDist = Math.hypot(
+    landmarks3D[0].x - landmarks3D[9].x,
+    landmarks3D[0].y - landmarks3D[9].y
+  );
+  return (zDiff / (xyDist + 1e-6)) < maxTiltRatio;
+}
+
+// ---------------- Tremor Analysis ----------------
 
 const TREMOR_WINDOW_SECONDS = 3.0;
 const TREMOR_MIN_SAMPLES = 20;
@@ -100,7 +123,7 @@ const TREMOR_FREQ_MIN = 3.0;
 const TREMOR_FREQ_MAX = 12.0;
 const TREMOR_BAND_RATIO_THRESHOLD = 0.10;
 const OVERSAMPLE_FACTOR = 4.0;
-const MIN_FPS_FOR_CONFIDENCE = OVERSAMPLE_FACTOR * TREMOR_FREQ_MAX; // 48 fps
+const MIN_FPS_FOR_CONFIDENCE = OVERSAMPLE_FACTOR * TREMOR_FREQ_MAX;
 
 function analyzeTremor(buffer) {
   if (buffer.length < TREMOR_MIN_SAMPLES) return null;
@@ -182,7 +205,12 @@ function analyzeTremor(buffer) {
   };
 }
 
-// ---------------- Simple peak finder ----------------
+// ---------------- Finger Tap Analysis ----------------
+
+const TAP_TEST_DURATION = 10.0;
+const TAP_RESAMPLE_HZ = 60;
+const TAP_MIN_PROMINENCE = 0.08;
+const TAP_MIN_SEPARATION_SEC = 0.12;
 
 function findPeaksSimple(signal, { prominence = 0, distance = 1 } = {}) {
   const N = signal.length;
@@ -220,13 +248,6 @@ function findPeaksSimple(signal, { prominence = 0, distance = 1 } = {}) {
   kept.sort((a, b) => a.i - b.i);
   return kept.map((k) => k.i);
 }
-
-// ---------------- Finger tap analysis ----------------
-
-const TAP_TEST_DURATION = 10.0;
-const TAP_RESAMPLE_HZ = 60;
-const TAP_MIN_PROMINENCE = 0.08;
-const TAP_MIN_SEPARATION_SEC = 0.12;
 
 function analyzeTaps(samples) {
   if (samples.length < 20) return null;
@@ -298,7 +319,7 @@ function analyzeTaps(samples) {
   };
 }
 
-// ---------------- Spiral reference ----------------
+// ---------------- Spiral Reference ----------------
 
 function generateSpiralPoints(center, maxRadius, turns, nPoints = 2000) {
   const pts = new Array(nPoints);
@@ -324,8 +345,8 @@ function minDistanceToSpiral(point, spiralPts) {
 
 const HandAnalysis = {
   realDFT, hanningWindow, linspace, interp, movingAverage, mean, std, ptp,
-  distanceAspect, handScaleOfAspect, rejectOutlier, findPeaksSimple, analyzeTremor, analyzeTaps,
-  generateSpiralPoints, minDistanceToSpiral,
+  distanceAspect, handScaleOfAspect, rejectOutlier, smoothPoint, isHandFlat,
+  analyzeTremor, analyzeTaps, generateSpiralPoints, minDistanceToSpiral,
   TREMOR_WINDOW_SECONDS, TAP_TEST_DURATION,
 };
 
