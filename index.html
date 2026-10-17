@@ -4,18 +4,36 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Hand Movement Screening Tool</title>
-  <link rel="stylesheet" href="style.css" />
+  <link rel="stylesheet" href="styles.css" />
 </head>
 <body>
-  <div id="app">
-    <video id="webcam" autoplay playsinline muted></video>
-    <canvas id="overlay"></canvas>
-    <div id="status-line">Loading hand tracking model...</div>
+  <div class="app-container">
+    <header class="app-header">
+      <div class="brand">
+        <svg class="logo-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M18 11V6a2 2 0 0 0-2-2v0a2 2 0 0 0-2 2v0"/>
+          <path d="M14 10V4a2 2 0 0 0-2-2v0a2 2 0 0 0-2 2v6"/>
+          <path d="M10 10.5V6a2 2 0 0 0-2-2v0a2 2 0 0 0-2 2v8"/>
+          <path d="M18 8a2 2 0 0 1 2 2v4a8 8 0 0 1-8 8h-2c-2.8 0-4.5-.86-5.99-2.34l-3.6-3.6a2 2 0 0 1 2.83-2.82L7 15"/>
+        </svg>
+        <h1>Hand Movement Screening</h1>
+      </div>
+      <div id="status-line" class="status-badge">Initializing system...</div>
+    </header>
+
+    <main class="viewport-card">
+      <div class="canvas-wrapper">
+        <video id="webcam" autoplay playsinline muted></video>
+        <canvas id="overlay"></canvas>
+      </div>
+    </main>
+
+    <footer class="app-footer">
+      <p class="disclaimer">Movement metrics only — not a medical diagnosis.</p>
+    </footer>
   </div>
 
-  <!-- Plain script (not a module) so analysis.js attaches to window.HandAnalysis -->
   <script src="analysis.js"></script>
-  <!-- Module script, needed for the MediaPipe Tasks Vision import -->
   <script type="module" src="app.js"></script>
 </body>
 </html>
