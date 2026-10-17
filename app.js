@@ -646,32 +646,29 @@ window.addEventListener("keydown", (e) => {
   else if (appState === "spiral") spiralTest.handleKey(e.key);
 });
 
-// ---------------- Startup with Flexible Aspect Ratio Fallbacks ----------------
+// ---------------- Startup with Legacy Hardware Fallback ----------------
 
-/**
- * Attempts to initialize the camera using standard aspect ratios (16:9, 4:3, etc.)
- * soft-requested via `ideal` constraints. Falls back cleanly to unconstrained video.
- */
 async function getCameraStreamWithFallback() {
-  const aspectRatios = [
-    { name: "16:9 Landscape", constraints: { width: { ideal: 1280 }, height: { ideal: 720 }, aspectRatio: { ideal: 1.7777777778 } } },
-    { name: "4:3 Standard", constraints: { width: { ideal: 640 }, height: { ideal: 480 }, aspectRatio: { ideal: 1.3333333333 } } },
-    { name: "1:1 Square", constraints: { width: { ideal: 720 }, height: { ideal: 720 }, aspectRatio: { ideal: 1.0 } } },
+  // Array of constraint profiles from ideal HD down to completely unconstrained
+  const profiles = [
+    { name: "Ideal HD 16:9", constraints: { video: { width: { ideal: 1280 }, height: { ideal: 720 }, facingMode: "user" } } },
+    { name: "Ideal SD 4:3", constraints: { video: { width: { ideal: 640 }, height: { ideal: 480 } } } },
+    { name: "Basic Video", constraints: { video: true } },
+    { name: "Bare Minimum Constraints", constraints: { video: {} } }
   ];
 
-  for (const config of aspectRatios) {
+  for (const profile of profiles) {
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: { ...config.constraints, facingMode: "user" },
-      });
+      console.log(`Attempting camera connection profile: ${profile.name}`);
+      const stream = await navigator.mediaDevices.getUserMedia(profile.constraints);
+      console.log(`Successfully acquired camera stream via ${profile.name}`);
       return stream;
     } catch (err) {
-      console.warn(`Camera profile fallback (${config.name}):`, err.name || err.message);
+      console.warn(`Profile failed (${profile.name}):`, err.name, err.message);
     }
   }
 
-  // Final fallback: Request any available camera feed without strict constraints
-  return await navigator.mediaDevices.getUserMedia({ video: true });
+  throw new Error("No compatible camera stream could be established.");
 }
 
 async function init() {
@@ -681,6 +678,7 @@ async function init() {
       "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm"
     );
 
+    // Load MediaPipe model with fallback for older hardware GPU limitations
     try {
       handLandmarker = await HandLandmarker.createFromOptions(vision, {
         baseOptions: {
@@ -692,7 +690,7 @@ async function init() {
         numHands: 2,
       });
     } catch (gpuErr) {
-      console.warn("GPU delegate failed, falling back to CPU delegate:", gpuErr);
+      console.warn("GPU delegate failed on this hardware, falling back to CPU:", gpuErr);
       handLandmarker = await HandLandmarker.createFromOptions(vision, {
         baseOptions: {
           modelAssetPath:
@@ -709,8 +707,16 @@ async function init() {
 
     video.srcObject = stream;
 
-    await new Promise((resolve) => { video.onloadedmetadata = resolve; });
-    video.play();
+    // Wait for video metadata to ensure dimensions are loaded before sizing canvas
+    await new Promise((resolve) => {
+      if (video.readyState >= 1) {
+        resolve();
+      } else {
+        video.onloadedmetadata = () => resolve();
+      }
+    });
+
+    await video.play();
     fitCanvasToVideo();
     window.addEventListener("resize", fitCanvasToVideo);
 
@@ -721,7 +727,7 @@ async function init() {
     console.error("Camera/Initialization error:", err);
     statusLine.innerHTML =
       `Error: ${err.message}<br>` +
-      `<small style="color: #b4b4b4;">Please ensure camera permissions are allowed, no other app (Zoom/Teams) is using the webcam, and you are using HTTPS.</small><br>` +
+      `<small style="color: #b4b4b4;">Camera hardware not detected or access blocked. Please verify permissions and ensure no other application is using the camera.</small><br>` +
       `<button onclick="location.reload()" style="margin-top:10px; padding:6px 16px; background:#ff7800; color:#fff; border:none; border-radius:4px; cursor:pointer;">Retry Camera Access</button>`;
   }
 }
